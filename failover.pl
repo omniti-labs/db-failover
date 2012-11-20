@@ -422,6 +422,7 @@ sub show_help_and_die {
     if ( defined $msg ) {
         printf STDERR $msg . "\n\n", @args;
     }
+
     print STDERR <<_END_OF_HELP_;
 Syntax:
     $PROGRAM_NAME config_file
