@@ -47,18 +47,20 @@ sub data_checks {
     my $all_ok = 1;
     my @data_checks = sort grep { /^data-check-/ } keys %{ $self->{ 'cfg' } };
     for my $data_check ( @data_checks ) {
-        my $C = $self->{'cfg'}->{ $data_check };
-        my $title = $C->{'title'} || $data_check;
+        my $C = $self->{ 'cfg' }->{ $data_check };
+        my $title = $C->{ 'title' } || $data_check;
         $self->status( "  - $title" );
-        my $result = $self->psql( $C->{'query'} );
-        $result->{'stdout'} =~ s/\s*\z//;
-        if ( $result->{'error_code'} ) {
+        my $result = $self->psql( $C->{ 'query' } );
+        $result->{ 'stdout' } =~ s/\s*\z//;
+        if ( $result->{ 'error_code' } ) {
             $all_ok = 0;
-            $self->status_change( 'ERROR: %s : %s', $result->{'error_code'}, $result->{'stderr'}, );
-        } elsif ( $result->{'stdout'} ne $C->{'result'} ) {
+            $self->status_change( 'ERROR: %s : %s', $result->{ 'error_code' }, $result->{ 'stderr' }, );
+        }
+        elsif ( $result->{ 'stdout' } ne $C->{ 'result' } ) {
             $all_ok = 0;
-            $self->status_change( 'ERROR: Unexpected return: [%s], expected [%s]', $result->{'stdout'}, $C->{'result'} );
-        } else {
+            $self->status_change( 'ERROR: Unexpected return: [%s], expected [%s]', $result->{ 'stdout' }, $C->{ 'result' } );
+        }
+        else {
             $self->status_change( 'OK' );
         }
     }
