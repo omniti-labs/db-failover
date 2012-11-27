@@ -79,7 +79,7 @@ sub promote_slave {
 
     $self->status( 'Checking that new pg is up and running in R/W mode' );
     my $start_time = time();
-    my $end_at     = time() + ( $C->{ 'timeout' } || 60 );
+    my $end_at     = time() + ( $self->{ 'cfg' }->{ 'db-check' }->{ 'timeout' } || 60 );
     my $is_ok      = undef;
     while ( 1 ) {
         $result = $self->psql( 'CREATE TEMP TABLE failover_check ( i int4 )' );
