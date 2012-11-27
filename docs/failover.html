@@ -1,0 +1,364 @@
+<?xml version="1.0" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title></title>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<link rev="made" href="mailto:depesz@h3po4.home.depesz.com" />
+</head>
+
+<body style="background-color: white">
+
+
+
+<ul id="index">
+  <li><a href="#NAME">NAME</a></li>
+  <li><a href="#SYNOPSIS">SYNOPSIS</a></li>
+  <li><a href="#DESCRIPTION">DESCRIPTION</a></li>
+  <li><a href="#How-it-works">How it works</a></li>
+  <li><a href="#Configuration">Configuration</a>
+    <ul>
+      <li><a href="#Environment-variables">Environment variables</a>
+        <ul>
+          <li><a href="#FAILOVER">FAILOVER</a></li>
+          <li><a href="#PATH">PATH</a></li>
+        </ul>
+      </li>
+      <li><a href="#Configuration-file">Configuration file</a>
+        <ul>
+          <li><a href="#Format">Format</a></li>
+          <li><a href="#Sections">Sections</a>
+            <ul>
+              <li><a href="#ip-takeover">ip-takeover</a></li>
+              <li><a href="#db-promotion">db-promotion</a></li>
+              <li><a href="#db-check">db-check</a></li>
+              <li><a href="#data-check--">data-check-*</a></li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li><a href="#COPYRIGHT">COPYRIGHT</a></li>
+</ul>
+
+
+
+<!--
+Source of this documentation is in failover.pod file, do not edit failover.html
+- it should be regenerated, using make, after changes are done to pod file.
+-->
+
+<h1 id="NAME">NAME</h1>
+
+<p>failover.pl - tool to simplify failover of PostgreSQL servers</p>
+
+<h1 id="SYNOPSIS">SYNOPSIS</h1>
+
+<p><b>failover.pl</b> <i>config_file</i></p>
+
+<h1 id="DESCRIPTION">DESCRIPTION</h1>
+
+<p>This program can be used to simplify and automate failover procedure for PostgreSQL master-slave clusters.</p>
+
+<p>Typically failover procedure consists of:</p>
+
+<ul>
+
+<li><p>ip takeover</p>
+
+</li>
+<li><p>promoting slave PostgreSQL to standalone/master</p>
+
+</li>
+<li><p>verifying state of data</p>
+
+</li>
+</ul>
+
+<p>All of these are done, with proper error checking, by this tool.</p>
+
+<p>Example session can be seen on <a href="http://ascii.io/a/1574">ascii.io site</a>.</p>
+
+<p>Configuration of what failover.pl does happens in two places: environment variables and config file.</p>
+
+<h1 id="How-it-works">How it works</h1>
+
+<p>Work is done in following steps:</p>
+
+<ul>
+
+<li><p>Display all settings, and request user confirmation</p>
+
+</li>
+<li><p>Check if shared IP is pingable (ping is done using TCP connect to port number specified in db-check section)</p>
+
+</li>
+<li><p>Regardless of whether IP is pingable, try to connect to old server and bring the network interface down</p>
+
+</li>
+<li><p>Depending on result of above two jobs:</p>
+
+<ul>
+
+<li><p>If neither ping nor bringing the interface down worked - raise warning, but continue.</p>
+
+</li>
+<li><p>If both ping and bringing the interface down worked - continue normally</p>
+
+</li>
+<li><p>If pinging didn&#39;t work, but bringing the interface down did - continue normally - PostgreSQL on master might be down.</p>
+
+</li>
+<li><p>If pinging did work, but bringing the interface down didn&#39;t - raise error, stop processing.</p>
+
+</li>
+</ul>
+
+</li>
+<li><p>Check if shared IP is pingable - this is now fatal if it doesn&#39;t work.</p>
+
+</li>
+<li><p>Connect to slave machine, and create promotion trigger file</p>
+
+</li>
+<li><p>In a loop, try to connect to shared IP, using psql, and create temporary table - if it fails, it means that slave didn&#39;t finish recovery yet. After timeout assume it&#39;s error, and stop processing.</p>
+
+</li>
+<li><p>Run user-supplied (in config file) checks to see if data on slave (new master) is correct/sensible.</p>
+
+</li>
+<li><p>Report &quot;All done.&quot;</p>
+
+</li>
+</ul>
+
+<p>Any error with processing is treated as fatal, unless described takeover-ip procedure, and running initial check on database to see if slave finished recovery.</p>
+
+<h1 id="Configuration">Configuration</h1>
+
+<h2 id="Environment-variables">Environment variables</h2>
+
+<h3 id="FAILOVER">FAILOVER</h3>
+
+<p>When FAILOVER variable is set to value <code>confirmed</code>, failover.pl will not ask user for confirmation. All output will be the same, just the interaction requirement will be removed.</p>
+
+<p>This is useful for fully-automating the failover, or to make it simpler to run using non-command-line interfaces (like WWW service).</p>
+
+<h3 id="PATH">PATH</h3>
+
+<p>As in any other shell program PATH variable is used to find binaries. failover.pl depends on PATH for finding tools it is using:</p>
+
+<ul>
+
+<li><p>psql</p>
+
+</li>
+<li><p>ssh</p>
+
+</li>
+</ul>
+
+<h2 id="Configuration-file">Configuration file</h2>
+
+<h3 id="Format">Format</h3>
+
+<p>The configuration file is in INI format. That is it contains a number of <i>sections</i>, each section containing number of <i>variables</i>.</p>
+
+<p>Section names are written within square brackets:</p>
+
+<pre><code>    [Section1]</code></pre>
+
+<p>Variables are written using notation:</p>
+
+<p><code>variable name</code> (<i>optional whitespace</i>) <code>=</code> (<i>optional whitespace</i>) <code>variable value</code></p>
+
+<p>for example:</p>
+
+<pre><code>    database-name = postgres</code></pre>
+
+<p>Empty lines are ignored, and so are comment lines, which should start with either <code>#</code> or <code>;</code> character.</p>
+
+<h3 id="Sections">Sections</h3>
+
+<p>There are three constant section names, each with its own set of variables, and a number of data checking sections which are used to define set of rules that the database should pass (after failover) to assume that everything is OK.</p>
+
+<h4 id="ip-takeover">ip-takeover</h4>
+
+<p>This section contains sets information about how to make failover, and how to test if it worked.</p>
+
+<p>Required variables:</p>
+
+<ul>
+
+<li><p><b>ip</b> - hostname or ip that will be taken over</p>
+
+</li>
+<li><p><b>old-host</b> - name or ip for host that will be used to ssh to release ip</p>
+
+</li>
+<li><p><b>old-type</b> - which method of bringing the interface down should be used. Currently there are two possibilities:</p>
+
+<ul>
+
+<li><p><i>none</i> - failover.pl will not connect to old host to bring the interface down</p>
+
+</li>
+<li><p><i>ifupdown</i> - failover.pl will use <code>ifdown interface-name</code> command</p>
+
+</li>
+</ul>
+
+</li>
+<li><p><b>old-interface</b> - this is required if <b>old-type</b> is set to <i>ifupdown</i> - name of the interface that should be brough down on old server.</p>
+
+</li>
+<li><p><b>new-host</b> - name or ip for host that will be used to ssh to take the ip</p>
+
+</li>
+<li><p><b>new-type</b> - which method of bringing the interface up should be used. Currently there are two possibilities:</p>
+
+<ul>
+
+<li><p><b>none</b> - failover.pl will not connect to new host to bring the interface up</p>
+
+</li>
+<li><p><b>ifupdown</b> - failover.pl will use <code>ifup interface-name</code> command</p>
+
+</li>
+</ul>
+
+</li>
+<li><p><b>new-interface</b> - this is required if <b>new-type</b> is set to <i>ifupdown</i> - name of the interface that should be brough up on new server.</p>
+
+</li>
+</ul>
+
+<p>Optional variables:</p>
+
+<ul>
+
+<li><p><b>initial-ping-timeout</b> - Before any commands are sent over SSH, failover.pl tests if the shared IP is reachable. This value sets timeout for this check. Defaults to <i>3</i> (seconds).</p>
+
+</li>
+<li><p><b>old-user</b> - username to ssh to old server as. Generally it&#39;s better to use <i>~/.ssh/config</i>, as explained in <i>howto.pod</i>.</p>
+
+</li>
+<li><p><b>new-user</b> - username to ssh to new server as. Generally it&#39;s better to use <i>~/.ssh/config</i>, as explained in <i>howto.pod</i>.</p>
+
+</li>
+<li><p><b>final-ping-timeout</b> - Timeout for final check, after IP takeover. This can take significantly longer due to ARP cache (check <i>howto.pod</i> for hints on how to make it shorter). Defaults to <i>60</i> (seconds).</p>
+
+</li>
+</ul>
+
+<h4 id="db-promotion">db-promotion</h4>
+
+<p>This section contains configuration for promoting slave to master/standalone slave.</p>
+
+<p>Currently failover.pl can do it only by creating trigger file - which is method used by PostgreSQL itself (in case of Streaming Replication), and by most (or even all) tools that help replicate using WAL segment files.</p>
+
+<p>Required variables:</p>
+
+<ul>
+
+<li><p><b>host</b> - hostname or ip of slave server to use when connecting over SSH</p>
+
+</li>
+<li><p><b>trigger-file</b> - filename (including full path) that should be created. Actual creation is done by simply running <code>touch trigger-file</code>, so it is important that directory, in which <i>trigger-file</i> should be placed, already exists.</p>
+
+</li>
+</ul>
+
+<p>Optional variables:</p>
+
+<ul>
+
+<li><p><b>user</b> - username to ssh to server as. Generally it&#39;s better to use <i>~/.ssh/config</i>, as explained in <i>howto.pod</i>.</p>
+
+</li>
+</ul>
+
+<h4 id="db-check">db-check</h4>
+
+<p>db-check section configures checking whether slave is accessible, and writable, under <i>shared IP</i></p>
+
+<p>Required variables:</p>
+
+<ul>
+
+<li><p><b>database</b> - database name to connect to</p>
+
+</li>
+<li><p><b>user</b> - username to use to authenticate when connecting to database</p>
+
+</li>
+<li><p><b>port</b> - port number to connect to PostgreSQL</p>
+
+</li>
+</ul>
+
+<p>You might have noticed that there is no <i>host</i> nor <i>ip</i> specified above - this is because database checking uses <i>ip</i> from <i>ip-takeover</i> section.</p>
+
+<p>Optional variables:</p>
+
+<ul>
+
+<li><p><b>timeout</b> - After how many seconds (default: <i>60</i>) to give up, and assume something went wrong.</p>
+
+</li>
+</ul>
+
+<h4 id="data-check--">data-check-*</h4>
+
+<p>This is not a single section, but a number of optional sections with names starting with <code>data-check-</code> and having some, unique within config file, suffix.</p>
+
+<p>For example:</p>
+
+<ul>
+
+<li><p>[data-check-1]</p>
+
+</li>
+<li><p>[data-check-2]</p>
+
+</li>
+<li><p>[data-check-orders]</p>
+
+</li>
+<li><p>[data-check-users]</p>
+
+</li>
+</ul>
+
+<p>Required variables:</p>
+
+<ul>
+
+<li><p><b>query</b> - query that should be run in new master database for this check</p>
+
+</li>
+<li><p><b>result</b> - expected result. Queries are run using standard options, so if the query returns multiple columns, it will be separated with <code>|</code> character (pipe).</p>
+
+</li>
+</ul>
+
+<p>Optional variables:</p>
+
+<ul>
+
+<li><p><b>title</b> - name of the check, as reported when running it. Defaults to name of the section.</p>
+
+</li>
+</ul>
+
+<h1 id="COPYRIGHT">COPYRIGHT</h1>
+
+<p>The OmniPITR project is Copyright (c) 2009-2012 OmniTI. All rights reserved.</p>
+
+
+</body>
+
+</html>
+
+

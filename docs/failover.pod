@@ -1,0 +1,317 @@
+=begin html
+
+<!--
+Source of this documentation is in failover.pod file, do not edit failover.html
+- it should be regenerated, using make, after changes are done to pod file.
+-->
+
+=end html
+
+=head1 NAME
+
+failover.pl - tool to simplify failover of PostgreSQL servers
+
+=head1 SYNOPSIS
+
+B<failover.pl> I<config_file>
+
+=head1 DESCRIPTION
+
+This program can be used to simplify and automate failover procedure for
+PostgreSQL master-slave clusters.
+
+Typically failover procedure consists of:
+
+=over
+
+=item * ip takeover
+
+=item * promoting slave PostgreSQL to standalone/master
+
+=item * verifying state of data
+
+=back
+
+All of these are done, with proper error checking, by this tool.
+
+Example session can be seen on L<ascii.io site|http://ascii.io/a/1574>.
+
+Configuration of what failover.pl does happens in two places: environment
+variables and config file.
+
+=head1 How it works
+
+Work is done in following steps:
+
+=over
+
+=item * Display all settings, and request user confirmation
+
+=item * Check if shared IP is pingable (ping is done using TCP connect to port
+number specified in db-check section)
+
+=item * Regardless of whether IP is pingable, try to connect to old server and
+bring the network interface down
+
+=item * Depending on result of above two jobs:
+
+=over
+
+=item * If neither ping nor bringing the interface down worked - raise warning,
+but continue.
+
+=item * If both ping and bringing the interface down worked - continue normally
+
+=item * If pinging didn't work, but bringing the interface down did - continue
+normally - PostgreSQL on master might be down.
+
+=item * If pinging did work, but bringing the interface down didn't - raise
+error, stop processing.
+
+=back
+
+=item * Check if shared IP is pingable - this is now fatal if it doesn't work.
+
+=item * Connect to slave machine, and create promotion trigger file
+
+=item * In a loop, try to connect to shared IP, using psql, and create temporary
+table - if it fails, it means that slave didn't finish recovery yet. After
+timeout assume it's error, and stop processing.
+
+=item * Run user-supplied (in config file) checks to see if data on slave (new
+master) is correct/sensible.
+
+=item * Report "All done."
+
+=back
+
+Any error with processing is treated as fatal, unless described takeover-ip
+procedure, and running initial check on database to see if slave finished
+recovery.
+
+=head1 Configuration
+
+=head2 Environment variables
+
+=head3 FAILOVER
+
+When FAILOVER variable is set to value C<confirmed>, failover.pl will not ask
+user for confirmation. All output will be the same, just the interaction
+requirement will be removed.
+
+This is useful for fully-automating the failover, or to make it simpler to run
+using non-command-line interfaces (like WWW service).
+
+=head3 PATH
+
+As in any other shell program PATH variable is used to find binaries.
+failover.pl depends on PATH for finding tools it is using:
+
+=over
+
+=item * psql
+
+=item * ssh
+
+=back
+
+=head2 Configuration file
+
+=head3 Format
+
+The configuration file is in INI format. That is it contains a number of
+I<sections>, each section containing number of I<variables>.
+
+Section names are written within square brackets:
+
+    [Section1]
+
+Variables are written using notation:
+
+C<variable name> (I<optional whitespace>) C<=> (I<optional whitespace>) C<variable value>
+
+for example:
+
+    database-name = postgres
+
+Empty lines are ignored, and so are comment lines, which should start with
+either C<#> or C<;> character.
+
+=head3 Sections
+
+There are three constant section names, each with its own set of variables, and
+a number of data checking sections which are used to define set of rules that
+the database should pass (after failover) to assume that everything is OK.
+
+=head4 ip-takeover
+
+This section contains sets information about how to make failover, and how to
+test if it worked.
+
+Required variables:
+
+=over
+
+=item * B<ip> - hostname or ip that will be taken over
+
+=item * B<old-host> - name or ip for host that will be used to ssh to release ip
+
+=item * B<old-type> - which method of bringing the interface down should be used.
+Currently there are two possibilities:
+
+=over
+
+=item * I<none> - failover.pl will not connect to old host to bring the interface
+down
+
+=item * I<ifupdown> - failover.pl will use C<ifdown interface-name> command
+
+=back
+
+=item * B<old-interface> - this is required if B<old-type> is set to I<ifupdown>
+- name of the interface that should be brough down on old server.
+
+=item * B<new-host> - name or ip for host that will be used to ssh to take the ip
+
+=item * B<new-type> - which method of bringing the interface up should be used.
+Currently there are two possibilities:
+
+=over
+
+=item * B<none> - failover.pl will not connect to new host to bring the interface
+up
+
+=item * B<ifupdown> - failover.pl will use C<ifup interface-name> command
+
+=back
+
+=item * B<new-interface> - this is required if B<new-type> is set to I<ifupdown>
+- name of the interface that should be brough up on new server.
+
+=back
+
+Optional variables:
+
+=over
+
+=item * B<initial-ping-timeout> - Before any commands are sent over SSH,
+failover.pl tests if the shared IP is reachable. This value sets timeout for
+this check. Defaults to I<3> (seconds).
+
+=item * B<old-user> - username to ssh to old server as. Generally it's better to
+use F<~/.ssh/config>, as explained in F<howto.pod>.
+
+=item * B<new-user> - username to ssh to new server as. Generally it's better to
+use F<~/.ssh/config>, as explained in F<howto.pod>.
+
+=item * B<final-ping-timeout> - Timeout for final check, after IP takeover. This
+can take significantly longer due to ARP cache (check F<howto.pod> for hints on how
+to make it shorter). Defaults to I<60> (seconds).
+
+=back
+
+=head4 db-promotion
+
+This section contains configuration for promoting slave to master/standalone
+slave.
+
+Currently failover.pl can do it only by creating trigger file - which is method
+used by PostgreSQL itself (in case of Streaming Replication), and by most (or
+even all) tools that help replicate using WAL segment files.
+
+Required variables:
+
+=over
+
+=item * B<host> - hostname or ip of slave server to use when connecting over SSH
+
+=item * B<trigger-file> - filename (including full path) that should be created.
+Actual creation is done by simply running C<touch trigger-file>, so it is
+important that directory, in which I<trigger-file> should be placed, already
+exists.
+
+=back
+
+Optional variables:
+
+=over
+
+=item * B<user> - username to ssh to server as. Generally it's better to use
+F<~/.ssh/config>, as explained in F<howto.pod>.
+
+=back
+
+=head4 db-check
+
+db-check section configures checking whether slave is accessible, and writable,
+under I<shared IP>
+
+Required variables:
+
+=over
+
+=item * B<database> - database name to connect to
+
+=item * B<user> - username to use to authenticate when connecting to database
+
+=item * B<port> - port number to connect to PostgreSQL
+
+=back
+
+You might have noticed that there is no I<host> nor I<ip> specified above - this
+is because database checking uses I<ip> from I<ip-takeover> section.
+
+Optional variables:
+
+=over
+
+=item * B<timeout> - After how many seconds (default: I<60>) to give up, and
+assume something went wrong.
+
+=back
+
+=head4 data-check-*
+
+This is not a single section, but a number of optional sections with names
+starting with C<data-check-> and having some, unique within config file, suffix.
+
+For example:
+
+=over
+
+=item * [data-check-1]
+
+=item * [data-check-2]
+
+=item * [data-check-orders]
+
+=item * [data-check-users]
+
+=back
+
+Required variables:
+
+=over
+
+=item * B<query> - query that should be run in new master database for this
+check
+
+=item * B<result> - expected result. Queries are run using standard options, so
+if the query returns multiple columns, it will be separated with C<|> character
+(pipe).
+
+=back
+
+Optional variables:
+
+=over
+
+=item * B<title> - name of the check, as reported when running it. Defaults to
+name of the section.
+
+=back
+
+=head1 COPYRIGHT
+
+The OmniPITR project is Copyright (c) 2009-2012 OmniTI. All rights reserved.
+
