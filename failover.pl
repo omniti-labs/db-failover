@@ -349,7 +349,7 @@ sub get_config {
 
     my $current_section = undef;
     while ( my $l = <$fh> ) {
-        next if $l =~ /\A\s*#/;
+        next if $l =~ /\A\s*[#;]/;
         next if $l =~ /\A\s*\z/;
 
         $l =~ s/\s*\z//;
