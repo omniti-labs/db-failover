@@ -13,6 +13,7 @@ use Data::Dumper;
 use Net::Ping;
 use Time::HiRes;
 use File::Temp;
+use FindBin;
 use Term::ANSIColor;
 use File::Temp qw( tempfile );
 
@@ -129,34 +130,45 @@ sub switch_ip {
 
     $self->status( 'Disabling IP (%s) on old host (%s)', $C->{ 'ip' }, $C->{ 'old' }->{ 'host' } );
 
-    my $result = $self->ssh(
-        $C->{ 'old' }->{ 'user' },
-        $C->{ 'old' }->{ 'host' },
-        $self->network_interface_change( 'down', $C->{ 'old' } ),
-        $ping_ok ? 'ERROR' : 'WARN',
-    );
-
-    if ( $result->{ 'error_code' } ) {
-        if ( $ping_ok ) {
-            printf 'Cannot disable network interface on old host (%s). And the IP is pingable. Cannot continue.%s', $C->{ 'old' }->{ 'host' }, "\n";
-            return;
+    my $result = {};
+    if ( $C->{ 'old' }->{ 'type' } ne 'none' ) {
+        $result = $self->ssh(
+            $C->{ 'old' }->{ 'user' },
+            $C->{ 'old' }->{ 'host' },
+            $self->network_interface_change( 'down', $C->{ 'old' } ),
+            $ping_ok ? 'ERROR' : 'WARN',
+        );
+        if ( $result->{ 'error_code' } ) {
+            if ( $ping_ok ) {
+                printf 'Cannot disable network interface on old host (%s). And the IP is pingable. Cannot continue.%s', $C->{ 'old' }->{ 'host' }, "\n";
+                return;
+            }
+            printf 'Cannot disable network interface on old host (%s), but cannot ping the takeover IP either. Continuing, but make sure old host does not bring the interface up.%s',
+                $C->{ 'old' }->{ 'host' }, "\n";
         }
-        printf 'Cannot disable network interface on old host (%s), but cannot ping the takeover IP either. Continuing, but make sure old host does not bring the interface up.%s',
-            $C->{ 'old' }->{ 'host' }, "\n";
+    }
+    else {
+        $self->status_change( 'OK : skipped' );
     }
 
     $self->status( 'Enabling IP (%s) on new host (%s)', $C->{ 'ip' }, $C->{ 'new' }->{ 'host' } );
 
-    $result = $self->ssh(
-        $C->{ 'new' }->{ 'user' },
-        $C->{ 'new' }->{ 'host' },
-        $self->network_interface_change( 'up', $C->{ 'new' } ),
-        'ERROR',
-    );
+    $result = {};
+    if ( $C->{ 'new' }->{ 'type' } ne 'none' ) {
+        $result = $self->ssh(
+            $C->{ 'new' }->{ 'user' },
+            $C->{ 'new' }->{ 'host' },
+            $self->network_interface_change( 'up', $C->{ 'new' } ),
+            'ERROR',
+        );
 
-    if ( $result->{ 'error_code' } ) {
-        printf 'Cannot bring up takeover IP interface on new host (%s).%s', $C->{ 'new' }->{ 'host' }, "\n";
-        return;
+        if ( $result->{ 'error_code' } ) {
+            printf 'Cannot bring up takeover IP interface on new host (%s).%s', $C->{ 'new' }->{ 'host' }, "\n";
+            return;
+        }
+    }
+    else {
+        $self->status_change( 'OK : skipped' );
     }
 
     $self->status( 'Checking db ip (%s) after takeover', $C->{ 'ip' } );
@@ -463,7 +475,7 @@ result=t
 
 For more information about config file, please run:
 
-    perldoc $PROGRAM_NAME
+    perldoc $FindBin::Bin/docs/failover.pod
 
 If you want to run without requiring confirmation, set shell environment variable
 
