@@ -1,0 +1,278 @@
+<?xml version="1.0" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title></title>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<link rev="made" href="mailto:depesz@h3po4.home.depesz.com" />
+</head>
+
+<body style="background-color: white">
+
+
+
+<ul id="index">
+  <li><a href="#NAME">NAME</a></li>
+  <li><a href="#HOWTO">HOWTO</a>
+    <ul>
+      <li><a href="#Basic-assumptions">Basic assumptions</a></li>
+      <li><a href="#Setup-procedure">Setup procedure</a>
+        <ul>
+          <li><a href="#Shared-IP-setup">Shared IP setup</a></li>
+          <li><a href="#Configuring-failover.pl">Configuring failover.pl</a></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li><a href="#COPYRIGHT">COPYRIGHT</a></li>
+</ul>
+
+
+
+<!--
+Source of this documentation is in howto.pod file, do not edit howto.html - it
+should be regenerated, using make, after changes are done to pod file.
+-->
+
+<h1 id="NAME">NAME</h1>
+
+<p>failover.pl - tool to simplify failover of PostgreSQL servers</p>
+
+<h1 id="HOWTO">HOWTO</h1>
+
+<p>This howto will guide you through setting failover script in simple master-&gt;slave replication cluster.</p>
+
+<h2 id="Basic-assumptions">Basic assumptions</h2>
+
+<p>In the whole howto, I use following names/ips/paths:</p>
+
+<ul>
+
+<li><p>vito - master server in replicated setup (ip: 192.168.0.101, interface eth0)</p>
+
+</li>
+<li><p>michael - slave server in replicated setup (ip: 192.168.0.102, interface eth0)</p>
+
+</li>
+<li><p>godfather - name that always points to master database (ip: 192.168.0.100)</p>
+
+</li>
+<li><p>/pgdata - data directory for PostgreSQL, on both vito and michael</p>
+
+</li>
+<li><p>postgres - name of system user that PostgreSQL server is running on, and also name of superuser account</p>
+
+</li>
+</ul>
+
+<p>Finally, I assume that the starting point of the setup procedure is when you have both vito and michael running PostgreSQL, with some kind of WAL-based replication (Streaming Replication, OmniPITR, or anything else that handles archive and restore of xlog files).</p>
+
+<p>It is also assumes that application connects to database using 192.168.0.101 ip.</p>
+
+<h2 id="Setup-procedure">Setup procedure</h2>
+
+<h3 id="Shared-IP-setup">Shared IP setup</h3>
+
+<p>On both, vito and michael, you have to add new interface, which will be alias on existing main interface - eth0.</p>
+
+<p>The way to do it is different based on OS/Distribution, you have, but the general ideas should be the same.</p>
+
+<p>On Debian/Ubuntu, you have to modify <i>/etc/network/interfaces</i> file, which will most likely have inside something like:</p>
+
+<pre><code>    auto lo
+    iface lo inet loopback
+
+    auto eth0
+    iface eth0 inet static
+        address 192.168.0.101
+        netmask 255.255.255.0
+        gateway 192.168.0.1</code></pre>
+
+<p>To this file, on <b>both</b> machines we have to add new block:</p>
+
+<pre><code>    iface eth0:0 inet static
+        address 192.168.0.100
+        netmask 255.255.255.0</code></pre>
+
+<p>It is important that there wouldn&#39;t be <code>auto eth0:0</code> - as we don&#39;t want this interface to be automatically brought up on system boot.</p>
+
+<p>If you have arping program, you might want to add also:</p>
+
+<pre><code>    up arping -c 1 -U 192.168.0.100 -I eth0 &gt; /dev/null 2&gt;&amp;1 || true</code></pre>
+
+<p>This will make sure that when failover will happen, arpcaches of all machines in LAN will get cleared so the IP takeover will be faster.</p>
+
+<p><i>Warning</i></p>
+
+<p>There are (on Ubuntu) two, not compatible versions of arping, in packages:</p>
+
+<ul>
+
+<li><p>iputils-arping</p>
+
+</li>
+<li><p>arping</p>
+
+</li>
+</ul>
+
+<p>Command line shown above is compatible with version of arping from <i>iputils-arping</i> package.</p>
+
+<p>So, full addition to <i>/etc/network/interfaces</i> should look:</p>
+
+<pre><code>    iface eth0:0 inet static
+        address 192.168.0.100
+        netmask 255.255.255.0
+        up arping -c 1 -U 192.168.0.100 -I eth0 &gt; /dev/null 2&gt;&amp;1 || true</code></pre>
+
+<p>After adding it to both machines, run on vito:</p>
+
+<pre><code>    $ ifup eth0:0</code></pre>
+
+<p>This should bring up this interface, which should make it possible to ping 192.168.0.100 from any host in lan. Do try:</p>
+
+<pre><code>    $ ping 192.168.0.100</code></pre>
+
+<p>Assuming it works, verify that your PostgreSQL listens on all interfaces. This can be done by simply trying to connect (using <i>psql</i>) to godfather host. If it works - we&#39;re fine. If not - make sure that in <i>/pgdata/postgresql.conf</i> on both machines, <b>listen_addresses</b> is set to <code>*</code>:</p>
+
+<pre><code>    listen_addresses = &#39;*&#39;</code></pre>
+
+<p>If you had to change it - you will need to restart PostgreSQL.</p>
+
+<p>At this moment, you should have:</p>
+
+<ul>
+
+<li><p>eth0:0 interface configured on both machines, with the same IP</p>
+
+</li>
+<li><p>eth0:0 interface up on vito and down on michael</p>
+
+</li>
+<li><p>PostgreSQL on 192.168.0.100 accessible to application</p>
+
+</li>
+</ul>
+
+<p>Final step is very simple - switch your application to use shared IP. How it is done depends on application, but basically in some db configuration you have to change <i>192.168.0.101</i> to <i>192.168.0.100</i>. Most likely you will also need to restart your application.</p>
+
+<h3 id="Configuring-failover.pl">Configuring failover.pl</h3>
+
+<p>First you have to decide what account, on what host to put <i>failover.pl</i> and its <i>.ini</i> file on. The account doesn&#39;t matter at all, it doesn&#39;t have to be root.</p>
+
+<p>To make <i>failover.pl</i> work, you need to make sure that the account you&#39;ll run it from will have password less access (over ssh) to:</p>
+
+<ul>
+
+<li><p>root@vito (for bringing down eth0:0 interface)</p>
+
+</li>
+<li><p>root@michael (for bringing up eth0:0 interface)</p>
+
+</li>
+<li><p>postgres@michael (for promoting slave to standalone)</p>
+
+</li>
+</ul>
+
+<p>This can be done by doing:</p>
+
+<pre><code>    $ ssh-keygen</code></pre>
+
+<p>and then appending generated <i>id_dsa.pub</i> key to <i>~/.ssh/authorized_keys</i> on all accounts listed above.</p>
+
+<p>Next you need to find out what is the name of trigger file. This is written in <i>/pgdata/recovery.conf</i> file, as either:</p>
+
+<pre><code>    trigger_file = &#39;/path/to/trigger-file&#39;</code></pre>
+
+<p>( in case of streaming replication ), or as an option to restore program in</p>
+
+<pre><code>    restore_command = &#39;....&#39;</code></pre>
+
+<p>Which option is it depends on what program is used for restore_command, for <i>omnipitr-restore</i> it&#39;s <b>--finish-trigger</b>/<b>-f</b></p>
+
+<p>Once you have this file path, you are ready to create <i>failover.ini</i> file. For my example, let&#39;s assume the trigger file is supposed to be <i>/tmp/trigger.file</i>.</p>
+
+<p>First, in the ini file, we need section on IP takeover:</p>
+
+<pre><code>    [ip-takeover]
+    old-host=vito
+    old-user=root
+    new-user=root
+    new-host=michael
+    old-type=ifupdown
+    old-interface=eth0:0
+    new-type=ifupdown
+    new-interface=eth0:0
+    ip=godfather</code></pre>
+
+<p>Of course instead of using names you can use IPs.</p>
+
+<p>Then, we need section that will configure how to promote slave:</p>
+
+<pre><code>    [db-promotion]
+    host=michael
+    user=postgres
+    trigger-file=/tmp/trigger.file</code></pre>
+
+<p>Finally, last <b>required</b> section, is db-check, which contains information about how to connect to database to see that promotion worked:</p>
+
+<pre><code>    [db-check]
+    user=postgres
+    port=5432
+    database=postgres</code></pre>
+
+<p><i>failover.pl</i> will use <i>ip</i> from <i>ip-takeover</i> section as host to connect to to run all the db checks.</p>
+
+<p>That&#39;s basically it. You might want to add some data-checks. For example. Let&#39;s assume you have objects table, and this table has relatively high write traffic. And you want to assume that everything worked fine only if last object update happened not earlier than 2 minutes ago:</p>
+
+<pre><code>    [data-check-objects-updated]
+    query=select max(last_updated_ts) &gt;= now() - &#39;2 minutes&#39;::interval from objects;
+    result=t</code></pre>
+
+<p>And that&#39;s about it. Full <i>failover.ini</i> would be:</p>
+
+<pre><code>    [ip-takeover]
+    old-host=vito
+    old-user=root
+    new-user=root
+    new-host=michael
+    old-type=ifupdown
+    old-interface=eth0:0
+    new-type=ifupdown
+    new-interface=eth0:0
+    ip=godfather
+
+    [db-promotion]
+    host=michael
+    user=postgres
+    trigger-file=/tmp/trigger.file
+
+    [db-check]
+    user=postgres
+    port=5432
+    database=postgres
+
+    [data-check-objects-updated]
+    query=select max(last_updated_ts) &gt;= now() - &#39;2 minutes&#39;::interval from objects;
+    result=t</code></pre>
+
+<p>Of course you might add more <b>data-check-*</b> sections, if you want.</p>
+
+<p>In case your ssh was listening on non-default port, the correct solution, is to add entry in <i>~/.ssh/config</i> file, like:</p>
+
+<pre><code>    Host michael
+        Port 22222</code></pre>
+
+<p>Of course, <i>~/.ssh/config</i> can be used also to specify username, in which case all the <b>*-user</b> parameters in <i>failvoer.ini</i> can be skipped.</p>
+
+<h1 id="COPYRIGHT">COPYRIGHT</h1>
+
+<p>The OmniPITR project is Copyright (c) 2009-2012 OmniTI. All rights reserved.</p>
+
+
+</body>
+
+</html>
+
+

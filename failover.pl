@@ -28,17 +28,11 @@ sub run {
     $self->get_config();
     $self->verify_config();
     $self->get_user_confirmation();
-    $self->run_failover();
-    print "\nAll done.\n";
-    exit;
-}
-
-sub run_failover {
-    my $self = shift;
     exit unless $self->switch_ip();
     exit unless $self->promote_slave();
     exit unless $self->data_checks();
-    return;
+    print "\nAll done.\n";
+    exit;
 }
 
 sub data_checks {
@@ -487,5 +481,173 @@ to value "confirmed". In bash, it can be done using:
 _END_OF_HELP_
     exit 1;
 }
+
+=head1 NAME failover.pl - script to automate PostgreSQL failover.
+
+This is just developer information.
+
+If you're looking for manual for failover.pl, just run:
+
+    failover.pl --help
+
+and check the lines "For more information ..."
+
+=head1 Control flow
+
+When running failover.pl, the only bit of program is:
+
+    Failover->new()->run();
+
+which runs constructor (new()) in Failover class, and on returned object, it
+runs ->run() method.
+
+new(), doesn't do anything aside from object creation.
+
+run() wraps all the work:
+
+=over
+
+=item * loading config (call to ->get_config())
+
+=item * validating config (call to ->verify_config())
+
+=item * printing config, and getting user confirmation (call to ->get_user_confirmation())
+
+=item * running code to do ip takeover (call to ->switch_ip())
+
+=item * promoting slave to standalone/master (call to ->promote_slave())
+
+=item * running data checks (call to ->data_checks())
+
+=back
+
+If any if the last 3 steps would fail - whole procedure is aborted.
+
+Finally run() prints "All done.", which is signal to user that everything
+went fine. If anything would go wrong - "All done" will not be printed.
+
+=head1 Methods
+
+=head2 new()
+
+Just object creation. No logic inside.
+
+=head2 run()
+
+Main function which calls other methods to do actual work. There is very
+little logic there: setting autoflush on stdout, and calling exit if
+failover functions would fail.
+
+=head2 data_checks()
+
+Runs all data checks as supplies in data-check-* sections in .ini.
+
+Order of running them is ascii-betical, and failover.pl will stop on first
+error.
+
+=head2 promote_slave()
+
+Runs "touch trigger_file" over ssh, and then, in a loop, connects to slave
+db and tries to create temporary table - which will fail as long as the
+database is read only or not accessible.
+
+=head2 ping()
+
+Helper function which does TCP ping to given host:port, with given timeout,
+and returns success/failure.
+
+=head2 switch_ip()
+
+Does IP takeover procedure.
+
+First it tries to ping shared IP.
+
+Then it conencts over ssh to current master, to bring down network
+interface.
+
+Afterwards - connects to new master and brings interface up.
+
+Finally - pings again (with longer timeout) to see if takeover worked.
+
+=head2 psql()
+
+Helper function, calls psql with given query, and specialized options
+(-qAtX, appropriate -h, -p, -U and -d), and returns structure from
+run_command(), in which, under "stdout" key - there is return value from the
+query.
+
+=head2 ssh()
+
+Helper functions which runs given command over ssh, and returns standard
+run_command() structure.
+
+=head2 network_interface_change()
+
+Methods which returns command that should be used to change network
+interface state (up/down).
+
+Currently there is no logic there, but there will be when we'll add more
+host types than "ifupdown". Other ideas might be "ifconfig", "iproute2" or
+even things like "amazon-eip".
+
+=head2 status()
+
+Prints information about what is being currently done, formatted nicely to
+leave place for information how given step ended (OK, WARN, ERROR).
+
+=head2 status_change()
+
+Prints given message, and colors it appropriately depending on first word
+being "OK", "WARN" or "ERROR".
+
+=head2 get_user_confirmation()
+
+Prints setup summary, and asks user for explcit confirmation that it's ok.
+
+If FAILVOER environment variable is set and contains "confirmed" value - it
+skips requesting confirmation.
+
+=head2 show_configuration_section()
+
+Helper function that prints formatted data about single section from
+configuration.
+
+=head2 verify_config()
+
+All logic to verify that passed config is sane and contains all required
+data.
+
+=head2 get_config()
+
+Loads and parses given config file. To avoid non-core-perl requirements,
+I wrote simple, regexp-based, ini-format parser. it's not fully, 100%
+robust, but should work in majority of cases.
+
+=head2 run_command()
+
+Runs, safely, given command, recording stdout and stderr, and returns
+hashref with following keys:
+
+=over
+
+=item * stdout - what command printed on stdout
+
+=item * stderr - what command printed on stderr
+
+=item * real_command - what command was actually executed (with all special
+characters escaped, and so on)
+
+=item * status - value returned by system() call
+
+=item * error_code - empty if there is no error, or more descriptive error
+information. Can be error core, or information about process being killed.
+
+=back
+
+=head2 show_help_and_die()
+
+As name suggests - prints short help page, and exists program.
+
+=cut
 
 1;
