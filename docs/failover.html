@@ -20,6 +20,7 @@
     <ul>
       <li><a href="#Environment-variables">Environment variables</a>
         <ul>
+          <li><a href="#DRY_RUN">DRY_RUN</a></li>
           <li><a href="#FAILOVER">FAILOVER</a></li>
           <li><a href="#PATH">PATH</a></li>
         </ul>
@@ -138,6 +139,12 @@ Source of this documentation is in failover.pod file, do not edit failover.html
 <h1 id="Configuration">Configuration</h1>
 
 <h2 id="Environment-variables">Environment variables</h2>
+
+<h3 id="DRY_RUN">DRY_RUN</h3>
+
+<p>If DRY_RUN variable is set, failover.pl will not run any actual change or ping - it will just print commands that it would run, and assume that they worked OK.</p>
+
+<p>This is useful for seeing what actually happens, and if all the paths as set correctly.</p>
 
 <h3 id="FAILOVER">FAILOVER</h3>
 

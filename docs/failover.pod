@@ -93,6 +93,14 @@ recovery.
 
 =head2 Environment variables
 
+=head3 DRY_RUN
+
+If DRY_RUN variable is set, failover.pl will not run any actual change or ping
+- it will just print commands that it would run, and assume that they worked OK.
+
+This is useful for seeing what actually happens, and if all the paths as set
+correctly.
+
 =head3 FAILOVER
 
 When FAILOVER variable is set to value C<confirmed>, failover.pl will not ask

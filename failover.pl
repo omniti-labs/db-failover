@@ -43,6 +43,7 @@ sub data_checks {
     my @data_checks = sort grep { /^data-check-/ } keys %{ $self->{ 'cfg' } };
     for my $data_check ( @data_checks ) {
         my $C = $self->{ 'cfg' }->{ $data_check };
+        $C->{ 'result' } = '' if $ENV{ 'DRY_RUN' };
         my $title = $C->{ 'title' } || $data_check;
         $self->status( "  - $title" );
         my $result = $self->psql( $C->{ 'query' } );
@@ -97,6 +98,10 @@ sub ping {
     my $self = shift;
     my ( $host, $port, $timeout ) = @_;
 
+    if ( $ENV{ 'DRY_RUN' } ) {
+        print "\n\nPinging $host, using tcp SYN to port $port, with timeout $timeout s.\n";
+        return 1;
+    }
     my $p = Net::Ping->new( 'tcp', $timeout );
     $p->port_number( $port );
     my $ping_status = $p->ping( $host );
@@ -393,6 +398,17 @@ sub run_command {
     my @cmd  = @_;
 
     my $real_command = join( ' ', map { quotemeta } @cmd );
+    if ( $ENV{ 'DRY_RUN' } ) {
+        print "\n\nRunning: $real_command\n";
+        return (
+            {
+                'real_command' => $real_command,
+                'status'       => 0,
+                'stdout'       => '',
+                'stderr'       => ''
+            }
+        );
+    }
 
     my ( $stdout_fh, $stdout_filename ) = tempfile( "failover.$PROCESS_ID.stdout.XXXXXX" );
     my ( $stderr_fh, $stderr_filename ) = tempfile( "failover.$PROCESS_ID.stderr.XXXXXX" );
